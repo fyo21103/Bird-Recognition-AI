@@ -8,7 +8,7 @@ app = Flask(__name__)
 CORS(app)
 api = Api(app, version='1.0', title='Bird Recognition API', description='A simple API for bird detection and identification')
 
-ns = api.namespace('birds', description='Bird operations')
+ns = api.namespace('BOPS', description='(Bird operations)')
 
 # Define the expected input model for documentation
 upload_parser = reqparse.RequestParser()

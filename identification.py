@@ -18,7 +18,7 @@ def identify_bird(image):
     """
 
     # Read JSON file containing bird labels and convert the content to a Python object
-    with open('bird_map.json', 'r') as json_file:
+    with open('bird_map_Ger.json', 'r') as json_file:
         bird_name_map = json.load(json_file)
 
     # get the device
