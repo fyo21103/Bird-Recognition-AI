@@ -28,10 +28,12 @@ def identify_bird(image):
     current_directory = os.getcwd()
 
     # Construct the path to the trained model
-    file_path = os.path.join(current_directory, 'trained-models', 'bird-resnet34best.pth')
+    file_path = os.path.join(current_directory, 'trained-models', 'updated_model.pth')
 
     # Transfer the model to the available device
-    model = to_device(ResNet34(3,450), device)
+    model = ResNet34(3, 450)  # Adjust the number of classes if necessary
+    model.load_state_dict(torch.load(file_path, map_location=device))
+    model = model.to(device)
 
     # Load the trained model
     model = (BirdResnet(model))
@@ -76,7 +78,7 @@ def predict_image(image, model, stats, device, bird_name_map):
     img = transform(im)
 
     # Convert to a batch of 1
-    xb = to_device(img.unsqueeze(0), device)
+    xb = img.unsqueeze(0).to(device)
 
     # Get predictions from model
     model.eval()
@@ -161,8 +163,9 @@ class ResNet34(nn.Module):
         out = self.downsample3(out) + self.res14(out)
         out = self.res15(out) + out
         out = self.res16(out) + out
+        out = out.to(self.classifier[-1].weight.device)
         out = self.classifier(out)
-        return (out)
+        return out
     
 
 class BirdResnet(nn.Module):
