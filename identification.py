@@ -28,7 +28,7 @@ def identify_bird(image):
     current_directory = os.getcwd()
 
     # Construct the path to the trained model
-    file_path = os.path.join(current_directory, 'trained-models', 'updated_model.pth')
+    file_path = os.path.join(current_directory, 'trained-models', 'new_update.pth')
 
     # Transfer the model to the available device
     model = ResNet34(3, 450)  # Adjust the number of classes if necessary
@@ -146,6 +146,8 @@ class ResNet34(nn.Module):
             (1, 1)), nn.Flatten(), nn.Dropout(0.17), nn.Linear(512, num_classes))
 
     def forward(self, xb):
+        xb = xb.to(next(self.parameters()).device)
+        # print("Input to forward device:", xb.device)
         out = self.conv1(xb)
         out = self.res1(out) + out
         out = self.res2(out) + out
@@ -164,6 +166,8 @@ class ResNet34(nn.Module):
         out = self.res15(out) + out
         out = self.res16(out) + out
         out = out.to(self.classifier[-1].weight.device)
+        # print("Output from forward device:", out.device)
+        # print("Classifier device:", next(self.classifier.parameters()).device)
         out = self.classifier(out)
         return out
     
