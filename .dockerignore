@@ -1,0 +1,11 @@
+.gitignore
+birds-dataset/
+test-data/
+bird_map_Cap.json
+bird_map.json
+*.csv
+_pycache_/
+.vscode/
+*.ipynb
+translatePy.py
+update_model.py
