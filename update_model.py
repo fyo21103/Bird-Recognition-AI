@@ -1,116 +1,103 @@
+import os
+import pandas as pd
 import torch
-from torch import nn
-import torch.optim as optim
-from torch.utils.data import DataLoader
 from torchvision.datasets import ImageFolder
-from torchvision.transforms import Compose, Resize, ToTensor, Normalize
+import torchvision.transforms as T
+from torch.utils.data import DataLoader
+from torch.nn import functional as F
+from identification import ResNet34  # Ensure this import is correct
+import torch.nn as nn
 
-from identification import ResNet34  
+class WrappedResNet34(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.network = ResNet34(3, 450)
 
-# Define the device to use: GPU if available, else CPU
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    def forward(self, x):
+        return self.network(x)
 
-# Initialize the model with the number of classes it was originally trained with
-num_original_classes = 450  # Change to the number of classes the pre-trained model has
-model = ResNet34(in_channels=3, num_classes=num_original_classes).to(device)
+def main():
+    # Paths to your new train and validation folders
+    new_train_data_dir = 'birds_dataset/train'
+    new_val_data_dir = 'birds_dataset/val'
 
-# Load the state dictionary
-state_dict_path = 'trained-models/bird-resnet34best.pth'
-state_dict = torch.load(state_dict_path, map_location=device)
+    # Replace these with your calculated mean and standard deviation
+    mean = [0.485, 0.456, 0.406]  # Example values
+    std = [0.229, 0.224, 0.225]   # Example values
 
-# If the state dict has 'network.' as a prefix for all keys (which seems to be the case)
-# Remove this prefix
-adjusted_state_dict = {k.replace('network.', ''): v for k, v in state_dict.items()}
+    # Define transformations
+    train_tfms = T.Compose([
+        T.Resize(256),  # Resize the image so it's at least 256x256
+        T.RandomCrop(224, padding=4, padding_mode='reflect'),
+        T.RandomApply(torch.nn.ModuleList([T.GaussianBlur(kernel_size=3, sigma=(0.2, 5))]), p=0.15),
+        T.RandomHorizontalFlip(), 
+        T.RandomRotation(10),
+        T.ToTensor(), 
+        T.Normalize(mean, std, inplace=True)
+    ])
 
-# Load the adjusted state dictionary into the model
-model.load_state_dict(adjusted_state_dict)
+    val_tfms = T.Compose([
+        T.Resize(224),  # Resize images to 224x224 for validation
+        T.ToTensor(), 
+        T.Normalize(mean, std, inplace=True)
+    ])
 
-# If the number of classes in the new task is different, adjust the classifier accordingly
-num_new_classes = 500  # Set to the number of classes for the new task
-if num_new_classes != num_original_classes:
-    # Replace the last layer with a new one (it will have requires_grad=True by default)
-    model.classifier[3] = nn.Linear(model.classifier[3].in_features, num_new_classes)
+    # Load new datasets
+    train_dataset = ImageFolder(new_train_data_dir, transform=train_tfms)
+    val_dataset = ImageFolder(new_val_data_dir, transform=val_tfms)
 
-# Move the model to the device after making modifications
-model = model.to(device)
+    # Create DataLoaders for new datasets
+    train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True, num_workers=2)
+    val_loader = DataLoader(val_dataset, batch_size=64, shuffle=False, num_workers=2)
 
-# Define your loss function and optimizer
-# The optimizer should only be constructed after the model is moved to the device
-criterion = nn.CrossEntropyLoss()
-optimizer = optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
+    # Initialize the wrapped model and load your existing model
+    wrapped_model = WrappedResNet34()
+    try:
+        wrapped_model.load_state_dict(torch.load('trained-models/bird-resnet34best.pth'))
+        print("Model loaded successfully")
+    except RuntimeError as e:
+        print("Error in loading model: ", e)
+        return  # Exit if model loading fails
 
-# Define transformations for your image data
-transform = Compose([
-    Resize((224, 224)),
-    ToTensor(),
-    Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-])
+    # Extract the original ResNet34 model
+    model = wrapped_model.network
 
-# Load your training and validation data
-train_data = ImageFolder(root='birds_dataset/train', transform=transform)
-val_data = ImageFolder(root='birds_dataset/val', transform=transform)
+    # Transfer model to GPU if available
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    model.to(device)
 
-# Create DataLoaders for your datasets
-# Set num_workers according to your system's specifications
-train_loader = DataLoader(train_data, batch_size=32, shuffle=True, num_workers=4)
-val_loader = DataLoader(val_data, batch_size=32, shuffle=False, num_workers=4)
+    # Training settings - adjust these parameters as needed
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    num_epochs = 25  # Number of epochs for retraining
 
-# A training function
-def train_model(model, criterion, optimizer, num_epochs=50):
+    # Training loop
     for epoch in range(num_epochs):
         model.train()
-        running_loss = 0.0
-        for inputs, labels in train_loader:
-            # Move inputs and labels to the device
-            inputs = inputs.to(device)
-            labels = labels.to(device)
-
+        for images, labels in train_loader:
+            images, labels = images.to(device), labels.to(device)
             optimizer.zero_grad()
-
-            # Forward pass
-            outputs = model(inputs)
-            # print("Inputs device: ", inputs.device)
-            # print("Labels device: ", labels.device)
-            # print("Outputs device: ", outputs.device)
-            # print("Model device: ", next(model.parameters()).device)
-
-
-            # Compute loss
-            loss = criterion(outputs, labels)
+            outputs = model(images)
+            loss = F.cross_entropy(outputs, labels)
             loss.backward()
             optimizer.step()
+        print(f'Epoch [{epoch+1}/{num_epochs}], Loss: {loss.item():.4f}')
 
-            running_loss += loss.item()
+        # Validation step
+        model.eval()
+        val_loss_total = 0
+        num_batches = 0
+        for images, labels in val_loader:
+            images, labels = images.to(device), labels.to(device)
+            outputs = model(images)
+            val_loss_total += F.cross_entropy(outputs, labels).item()
+            num_batches += 1
+        val_loss_avg = val_loss_total / num_batches
+        print(f'Validation Loss: {val_loss_avg:.4f}')
 
-        epoch_loss = running_loss / len(train_loader)
-        print(f'Epoch {epoch+1}/{num_epochs}, Loss: {epoch_loss}')
+    # Save the updated model
+    torch.save(model.state_dict(), 'trained-models/updated_model.pth')
 
-    print('Finished Training')
-    return model
+    print("Model updated and saved successfully.")
 
-def calculate_accuracy(model, data_loader, device):
-    model.eval()  # Set the model to evaluation mode
-    correct = 0
-    total = 0
-
-    with torch.no_grad():  # Deactivate autograd to reduce memory usage and speed up computations
-        for inputs, labels in data_loader:
-            inputs, labels = inputs.to(device), labels.to(device)
-            outputs = model(inputs)
-            _, predicted = torch.max(outputs.data, 1)
-            total += labels.size(0)
-            correct += (predicted == labels).sum().item()
-
-    accuracy = 100 * correct / total
-    return accuracy
-
-# Main block
-if __name__ == "__main__":
-    trained_model = train_model(model, criterion, optimizer, num_epochs=50)
-    # Save the entire model
-    torch.save(model, 'trained-models/new_update.pth')
-    train_accuracy = calculate_accuracy(model, train_loader, device)
-    print(f'Training Accuracy: {train_accuracy}%')
-
-
-    # Add inference code as needed
+if __name__ == '__main__':
+    main()

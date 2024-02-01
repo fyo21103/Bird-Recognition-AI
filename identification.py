@@ -28,7 +28,7 @@ def identify_bird(image):
     current_directory = os.getcwd()
 
     # Construct the path to the trained model
-    file_path = os.path.join(current_directory, 'trained-models', 'new_update.pth')
+    file_path = os.path.join(current_directory, 'trained-models', 'updated_model.pth')
 
     # Transfer the model to the available device
     model = ResNet34(3, 450)  # Adjust the number of classes if necessary
